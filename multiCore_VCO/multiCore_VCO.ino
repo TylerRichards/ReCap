@@ -23,6 +23,9 @@ uint16_t buff1[8] = {0,0,0,0,0,0,0,0}; // buffer used by core0 to store processe
 
 int potCounter = 0;
 
+uint16_t ADCavg[8] = {0,0,0,0,0,0,0,0};
+uint16_t POTavg[8] = {0,0,0,0,0,0,0,0};
+
 uint16_t currentTime = 0;
 
 SPISettings parSPI(31250000, MSBFIRST, SPI_MODE0);
@@ -91,6 +94,8 @@ void setup() {
   SPI.begin(true);
   SPI.beginTransaction(parSPI);
 
+  Serial.begin(9600) ; 
+
   mutex_init(&sync0_lock);
 
   // Start core 1 (SPI Interaction)
@@ -108,14 +113,42 @@ void loop() {
     }
 
     
-  uint16_t currentTime = (uint16_t)time_us_32() ; 
-  //currentTime++ ; 
+  uint64_t currentTime = 0x0000FFFF & time_us_32() ; 
+
   // process data
   for (int i = 0; i < 8; i++){
-    buff1[i] = sine[ uint16_t(currentTime * (ADCBuff[i+8] >> 8 )) ] ; //Go to value of sine in look-up table and place in buffer
-    //buff1[i] = sine[ uint16_t(currentTime * (ADCBuff[i] >> 8 )) ] ; //Go to value of sine in look-up table and place in buffer
+
+    uint32_t POTtemp = (uint32_t)(ADCBuff[i+8] >> 6) ; 
+    uint32_t ADCtemp =  (uint32_t)(ADCBuff[i] >> 7); 
+    
+    //De-noise Pot and ADC readings
+    POTavg[i] -= (POTavg[i] / 12 );
+    POTavg[i] += (POTtemp / 12);
+
+    ADCavg[i] -= (ADCavg[i] / 12);
+    ADCavg[i] += (ADCtemp / 12);
+
+    uint32_t outputTemp = (uint32_t)ADCavg[i] * (uint32_t)currentTime ; 
+    outputTemp = 0x0000FFFF & (outputTemp >> 6) ; 
+
+    
+/*
+    uint32_t outputTemp = ADCavg[i] * POTavg[i] ; 
+    outputTemp = 0x0000FFFF & (outputTemp >> 4) ; 
+    
+    uint64_t roundTemp = (uint64_t)(outputTemp>>4) * currentTime ;  
+/*
+    if (!i) {
+      Serial.println(roundTemp) ; 
+      delay(10) ; 
+    }
+
+    roundTemp = 0x0000FFFF & (roundTemp >> 4) ;
+*/
+    //buff1[i] = sine[ uint16_t(roundTemp) ] ; //Go to value of sine in look-up table and place in buffer
+    buff1[i] = sine[ uint16_t((ADCavg[i]>>2) * currentTime) ] ;
   }
-  
+    
   // indicate to core1 that buff1 is updated   
     mutex_enter_blocking(&sync0_lock) ; 
     sync0 = 0 ; //Core1 Done 
